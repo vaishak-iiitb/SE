@@ -1,30 +1,23 @@
 // Jenkins Pipeline defined using the declarative syntax
 pipeline {
-    // Agent specifies where the pipeline will execute. 
-    // 'any' uses any available agent (node/executor).
     agent any 
 
-    // Define environment variables, especially for DockerHub credentials
     environment {
-        // --- ⚠️ REPLACE THESE PLACEHOLDERS ⚠️ ---
-        // Your DockerHub username
+        // --- Placeholders defined ---
         DOCKERHUB_USERNAME = 'vaishak2005'
-        // Your roll number (used for the image tag)
         ROLL_NUMBER = 'imt2023085'
-        // ID of the Jenkins 'Username with password' credential for DockerHub login
-        DOCKER_CREDS_ID = 'dockerhub-creds	' 
+        // FIX: Removed trailing whitespace from credential ID
+        DOCKER_CREDS_ID = 'dockerhub-creds' 
         
-        // Assembled image name
         IMAGE_NAME = "${DOCKERHUB_USERNAME}/${ROLL_NUMBER}-cli-todo"
+        // Define the full path for the Docker executable once
+        DOCKER_CLI = '/usr/local/bin/docker'
     }
 
-    // Stages define a conceptual division of the pipeline
     stages {
         // 1. Checkout Stage: Pulls the code from GitHub
         stage('Pull Code (Checkout)') {
             steps {
-                // You can also add the 'credentialsId' here if you want to be explicit,
-                // but it often defaults correctly from the job configuration.
                 git branch: 'main', url: 'https://github.com/vaishak-iiitb/todo-cli-app'
             }
         }
@@ -36,22 +29,17 @@ pipeline {
                 sh '/usr/bin/python3 -m venv .venv'
                 
                 echo 'Installing Pytest and other dependencies from requirements.txt...'
-                // This step assumes 'requirements.txt' is present and contains 'pytest'
                 sh '.venv/bin/pip install --upgrade pip'
                 sh '.venv/bin/pip install -r requirements.txt'
             }
         }
 
         // 3. Test Stage: Runs the automated tests using Pytest
-        // Updated Jenkinsfile snippet for the 'Run Tests (Pytest)' stage
         stage('Run Tests (Pytest)') {
             steps {
                 script {
                     echo 'Running Pytest tests...'
-                    
-                    // --- ⬇️ FIX: Set PYTHONPATH before running Pytest ⬇️ ---
                     withEnv(['PYTHONPATH=src/main/python']) {
-                        // Execute pytest using the virtual environment's executable
                         def testResult = sh(returnStatus: true, script: '.venv/bin/pytest -v')
                         if (testResult != 0) {
                             error 'Pytest failed. Aborting pipeline.'
@@ -61,39 +49,48 @@ pipeline {
             }
         }
 
-        // 4. Docker Build Stage: Creates the Docker Image
-            // Updated Jenkinsfile snippet for the 'Build Docker Image' stage
-            stage('Build Docker Image') {
-                steps {
-                    echo "Building Docker image: ${IMAGE_NAME}:latest"
-                    
-                    // --- ⬇️ FIX: Temporarily set the DOCKER_BUILDKIT environment variable ⬇️ ---
-                    // Setting DOCKER_BUILDKIT to 0 often resolves issues with credential helpers in CI environments.
-                    withEnv(["DOCKER_BUILDKIT=0"]) {
-                        // Build the Docker Image
-                        sh "/usr/local/bin/docker build -t ${IMAGE_NAME}:latest ."
+        // 4. Docker Build Stage: FIXES rate limit by logging in BEFORE build
+        stage('Build Docker Image') {
+            steps {
+                echo "Building Docker image: ${IMAGE_NAME}:latest"
+                
+                script {
+                    // Login to DockerHub using the stored Jenkins credential to use authenticated pull quota
+                    withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDS_ID}", passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
+                        
+                        echo 'Logging into DockerHub to bypass pull rate limits...'
+                        sh "echo \$DOCKER_PASSWORD | ${DOCKER_CLI} login -u \$DOCKER_USERNAME --password-stdin"
+
+                        // Apply DOCKER_BUILDKIT=0 fix and run build
+                        withEnv(["DOCKER_BUILDKIT=0"]) {
+                            sh "${DOCKER_CLI} build -t ${IMAGE_NAME}:latest ."
+                        }
+                        
+                        // Logout immediately to not carry session state into the next stage
+                        sh "${DOCKER_CLI} logout"
                     }
-                    
-                    // Check the image was created
-                    sh "/usr/local/bin/docker images | grep ${IMAGE_NAME}"
                 }
+                
+                // Check the image was created
+                sh "${DOCKER_CLI} images | grep ${IMAGE_NAME}"
             }
+        }
         
-        // 5. Docker Push Stage: Pushes the image to DockerHub
+        // 5. Docker Push Stage: Pushes the image to DockerHub (requires re-login)
         stage('Push Docker Image to Hub') {
             steps {
                 script {
-                    // Login to DockerHub using the stored Jenkins credential
+                    // Relog in just for the push
                     withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDS_ID}", passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
                         
-                        echo 'Logging into DockerHub...'
-                        sh "echo \$DOCKER_PASSWORD | docker login -u \$DOCKER_USERNAME --password-stdin"
+                        echo 'Re-logging into DockerHub for push...'
+                        sh "echo \$DOCKER_PASSWORD | ${DOCKER_CLI} login -u \$DOCKER_USERNAME --password-stdin"
                         
                         echo "Pushing Docker image ${IMAGE_NAME}:latest..."
-                        sh "docker push ${IMAGE_NAME}:latest"
+                        sh "${DOCKER_CLI} push ${IMAGE_NAME}:latest"
                         
-                        // Logout is optional but good practice
-                        sh "docker logout"
+                        // Final logout
+                        sh "${DOCKER_CLI} logout"
                     }
                 }
             }
@@ -111,7 +108,6 @@ pipeline {
         failure {
             echo 'Pipeline failed! Check logs for errors.'
         }
-        // Optional: Clean up workspace (removes .venv, code, etc.)
         cleanup {
             deleteDir() 
         }
