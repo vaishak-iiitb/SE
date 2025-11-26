@@ -62,14 +62,15 @@ pipeline {
         }
 
         // 4. Docker Build Stage: Creates the Docker Image
+        // Jenkinsfile snippet
         stage('Build Docker Image') {
             steps {
                 echo "Building Docker image: ${IMAGE_NAME}:latest"
-                // The '.' assumes the Dockerfile is in the root of the workspace
-                sh "docker build -t ${IMAGE_NAME}:latest ."
+                // ⬇️ Replace 'docker' with the full path to the executable ⬇️
+                sh "/usr/local/bin/docker build -t ${IMAGE_NAME}:latest ."
                 
-                // Check the image was created (using 'docker images')
-                sh "docker images | grep ${IMAGE_NAME}"
+                // ⬇️ Update the grep command similarly ⬇️
+                sh "/usr/local/bin/docker images | grep ${IMAGE_NAME}"
             }
         }
         
