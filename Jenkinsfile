@@ -43,15 +43,19 @@ pipeline {
         }
 
         // 3. Test Stage: Runs the automated tests using Pytest
+        // Updated Jenkinsfile snippet for the 'Run Tests (Pytest)' stage
         stage('Run Tests (Pytest)') {
             steps {
                 script {
                     echo 'Running Pytest tests...'
-                    // Execute pytest using the virtual environment's executable
-                    // Use returnStatus: true to check the exit code for pass/fail
-                    def testResult = sh(returnStatus: true, script: '.venv/bin/pytest -v')
-                    if (testResult != 0) {
-                        error 'Pytest failed. Aborting pipeline.'
+                    
+                    // --- ⬇️ FIX: Set PYTHONPATH before running Pytest ⬇️ ---
+                    withEnv(['PYTHONPATH=src/main/python']) {
+                        // Execute pytest using the virtual environment's executable
+                        def testResult = sh(returnStatus: true, script: '.venv/bin/pytest -v')
+                        if (testResult != 0) {
+                            error 'Pytest failed. Aborting pipeline.'
+                        }
                     }
                 }
             }
