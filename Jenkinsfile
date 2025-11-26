@@ -62,17 +62,22 @@ pipeline {
         }
 
         // 4. Docker Build Stage: Creates the Docker Image
-        // Jenkinsfile snippet
-        stage('Build Docker Image') {
-            steps {
-                echo "Building Docker image: ${IMAGE_NAME}:latest"
-                // ⬇️ Replace 'docker' with the full path to the executable ⬇️
-                sh "/usr/local/bin/docker build -t ${IMAGE_NAME}:latest ."
-                
-                // ⬇️ Update the grep command similarly ⬇️
-                sh "/usr/local/bin/docker images | grep ${IMAGE_NAME}"
+            // Updated Jenkinsfile snippet for the 'Build Docker Image' stage
+            stage('Build Docker Image') {
+                steps {
+                    echo "Building Docker image: ${IMAGE_NAME}:latest"
+                    
+                    // --- ⬇️ FIX: Temporarily set the DOCKER_BUILDKIT environment variable ⬇️ ---
+                    // Setting DOCKER_BUILDKIT to 0 often resolves issues with credential helpers in CI environments.
+                    withEnv(["DOCKER_BUILDKIT=0"]) {
+                        // Build the Docker Image
+                        sh "/usr/local/bin/docker build -t ${IMAGE_NAME}:latest ."
+                    }
+                    
+                    // Check the image was created
+                    sh "/usr/local/bin/docker images | grep ${IMAGE_NAME}"
+                }
             }
-        }
         
         // 5. Docker Push Stage: Pushes the image to DockerHub
         stage('Push Docker Image to Hub') {
